@@ -13,84 +13,153 @@ struct Chip8 {
     registers: [u8; 16],
 }
 
-fn init_chip8() -> Chip8 {
-    return Chip8 {
-        ram: [0x0; 4096],
-        display: [false; 64 * 32],
-        pc: 0,
-        i: 0,
-        stack: Vec::new(),
-        delay_timer: 0,
-        sound_timer: 0,
-        registers: [0x0; 16],
-    };
-}
+impl Chip8 {
+    fn new() -> Chip8 {
+        let mut chip8 = Chip8 {
+            ram: [0x0; 4096],
+            display: [false; 64 * 32],
+            pc: 0,
+            i: 0,
+            stack: Vec::new(),
+            delay_timer: 0,
+            sound_timer: 0,
+            registers: [0x0; 16],
+        };
 
-fn load_rom(chip8: &mut Chip8, rom: String) -> io::Result<()> {
-    let file = File::open(rom)?;
-    let mut reader = BufReader::new(file);
-    let mut buffer = Vec::new();
+        let fonts: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+            0x20, 0x60, 0x20, 0x20, 0x70,   // 1
+            0xF0, 0x10, 0xF0, 0x80, 0xF0,   // 2
+            0xF0, 0x10, 0xF0, 0x10, 0xF0,   // 3
+            0x90, 0x90, 0xF0, 0x10, 0x10,   // 4
+            0xF0, 0x80, 0xF0, 0x10, 0xF0,   // 5
+            0xF0, 0x80, 0xF0, 0x90, 0xF0,   // 6
+            0xF0, 0x10, 0x20, 0x40, 0x40,   // 7
+            0xF0, 0x90, 0xF0, 0x90, 0xF0,   // 8
+            0xF0, 0x90, 0xF0, 0x10, 0xF0,   // 9
+            0xF0, 0x90, 0xF0, 0x90, 0x90,   // A
+            0xE0, 0x90, 0xE0, 0x90, 0xE0,   // B
+            0xF0, 0x80, 0x80, 0x80, 0xF0,   // C
+            0xE0, 0x90, 0x90, 0x90, 0xE0,   // D
+            0xF0, 0x80, 0xF0, 0x80, 0xF0,   // E
+            0xF0, 0x80, 0xF0, 0x80, 0x80];  // F
 
-    // Read file into vector.
-    reader.read_to_end(&mut buffer).unwrap();
+        for (i, e) in fonts.iter().enumerate() {
+            chip8.ram[i + 50] = *e;
+        }
 
-    // load to ram
-    let mut i = 200;
-    for value in buffer {
-        chip8.ram[i] = value;
-        i = i + 1;
+        return chip8;
     }
 
-    chip8.pc = 200;
-    Ok(())
-}
+    fn clear_screen(&mut self) {
+        for i in 0..(self.display.len())  {
+            self.display[i] = false;
+        }
+    }
 
-fn execute(chip8: &mut Chip8) -> Result<(), String> {
-    loop {
-        // read the instruction pointed from the pc:
-        let (first_nibble, second_nibble) = fetch_instruction(chip8);
-        let (third_nibble, fourth_nibble) = fetch_instruction(chip8);
+    fn load_rom(&mut self, rom: String) -> io::Result<()> {
+        let file = File::open(rom)?;
+        let mut reader = BufReader::new(file);
+        let mut buffer = Vec::new();
 
-        match first_nibble {
+        // Read file into vector.
+        reader.read_to_end(&mut buffer).unwrap();
 
-            0 => {
+        // load to ram
+        let mut i = 200;
+        for value in buffer {
+            self.ram[i] = value;
+            i = i + 1;
+        }
 
-            }
+        self.pc = 200;
+        Ok(())
+    }
 
-            _ => {
-                return Err(String::from("Unknown instruction"))
+    fn subroutine_return(&mut self) {
+        self.pc = self.stack.pop().unwrap();
+    }
+
+    fn jump(&mut self, location: u16) {
+        self.pc = location;
+    }
+
+    fn execute(&mut self) -> Result<(), String> {
+        loop {
+            // read the instruction pointed from the pc:
+            let (first_nibble, second_nibble) = self.fetch_instruction();
+            let (third_nibble, fourth_nibble) = self.fetch_instruction();
+
+            match first_nibble {
+                0x0 => {
+                    match second_nibble {
+                        0x0 => {
+                            match third_nibble {
+                                0xE => {
+                                    match fourth_nibble {
+                                        0x0 => {
+                                            self.clear_screen()
+                                        }
+                                        0xE => {
+                                            self.subroutine_return()
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        _ => {
+
+                        }
+                    }
+                }
+
+                0x1 => {
+                    self.jump((u16::from(second_nibble) << 8) + (u16::from(third_nibble) << 4) + u16::from(fourth_nibble));
+                }
+
+                0x6 => {
+
+                }
+
+                _ => {
+                    return Err(String::from("Unknown instruction"));
+                }
             }
         }
     }
+
+    fn fetch_instruction(&mut self) -> (u8, u8) {
+        let instruction = self.ram[self.pc as usize];
+        self.pc = self.pc + 1;
+
+        let first_nibble = instruction << 4;
+        let second_nibble = instruction >> 4;
+
+        return (first_nibble, second_nibble);
+    }
 }
 
-fn fetch_instruction(chip8: &mut Chip8) -> (u8, u8) {
-    let instruction = chip8.ram[chip8.pc as usize];
-    chip8.pc = chip8.pc + 1;
-
-    let first_nibble = instruction << 4;
-    let second_nibble = instruction >> 4;
-
-    return (first_nibble, second_nibble);
-}
 
 fn main() {
-    let chip8 = &mut init_chip8();
-    load_rom(chip8, String::from("roms/IBM Logo.ch8"));
+    let mut chip8 = Chip8::new();
+    chip8.load_rom(String::from("roms/IBM Logo.ch8"));
 
-    execute(chip8);
+    chip8.execute();
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn shift_left() {
-        let a : u8 = 255;
+        let a: u8 = 255;
         assert_eq!(15, (a >> 4));
     }
+
     #[test]
     fn shift_right() {
-        let a : u8 = 255;
+        let a: u8 = 255;
         assert_eq!(240, (a << 4));
     }
 }
