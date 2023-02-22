@@ -170,7 +170,7 @@ impl Chip8 {
             // read the instruction pointed from the pc:
             let instruction = self.fetch_instruction()?;
 
-            println!("DEBUG Instruction: {}", instruction.to_string());
+            println!("DEBUG Instruction: {}, pc: {}", instruction.to_string(), self.pc);
 
             match instruction.first_nibble {
                 0x0 => {

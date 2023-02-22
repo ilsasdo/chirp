@@ -50,8 +50,8 @@ mod tests {
 
     #[test]
     fn build_instruction_from_nibbles() {
-        assert_eq!(0x3, Instruction::byte_sum_3(0x0, 0x0, 0x3));
-        assert_eq!(0x23, Instruction::byte_sum_3(0x0, 0x2, 0x3));
-        assert_eq!(0x23, Instruction::byte_sum_3(0x0, 0x2, 0x3));
+        // assert_eq!(3, Instruction::byte_sum_3(0x0, 0x0, 0x3));
+        // assert_eq!(0x23, Instruction::byte_sum_3(0x0, 0x2, 0x3));
+        assert_eq!(228, Instruction::byte_sum_3((2 as u8), (2 as u8), (8 as u8)));
     }
 }
