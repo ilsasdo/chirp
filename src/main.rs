@@ -1,10 +1,13 @@
+pub mod instruction;
+
 use std::fs::File;
 use std::io;
 use std::io::{BufReader, Read};
+use crate::instruction::Instruction;
 
 struct Chip8 {
     ram: [u8; 4096],
-    display: [bool; 64 * 32],
+    display: [[bool; 32]; 64],
     pc: u16,
     i: u16,
     stack: Vec<u16>,
@@ -17,7 +20,7 @@ impl Chip8 {
     fn new() -> Chip8 {
         let mut chip8 = Chip8 {
             ram: [0x0; 4096],
-            display: [false; 64 * 32],
+            display: [[false; 32]; 64],
             pc: 0,
             i: 0,
             stack: Vec::new(),
@@ -51,8 +54,10 @@ impl Chip8 {
     }
 
     fn clear_screen(&mut self) {
-        for i in 0..(self.display.len())  {
-            self.display[i] = false;
+        for x in 0..(self.display.len()) {
+            for y in 0..(self.display[x].len()) {
+                self.display[x][y] = false;
+            }
         }
     }
 
@@ -75,6 +80,20 @@ impl Chip8 {
         Ok(())
     }
 
+    fn fetch_instruction(&mut self) -> Result<Instruction, String> {
+        if (self.pc + 1) as usize >= self.ram.len() {
+            return Err(String::from("Out of Memory!"));
+        }
+
+        let first_byte = self.ram[self.pc as usize];
+        self.pc = self.pc + 1;
+        let second_byte = self.ram[self.pc as usize];
+        self.pc = self.pc + 1;
+
+        let instruction = Instruction::new(first_byte, second_byte);
+        return Ok(instruction);
+    }
+
     fn subroutine_return(&mut self) {
         self.pc = self.stack.pop().unwrap();
     }
@@ -83,19 +102,83 @@ impl Chip8 {
         self.pc = location;
     }
 
+    fn set_register(&mut self, register: u8, value: u8) {
+        self.registers[usize::from(register)] = value;
+    }
+
+    fn set_index_register(&mut self, value: u16) {
+        self.i = value;
+    }
+
+    fn add_to_register(&mut self, register: u8, value: u8) {
+        self.registers[usize::from(register)] += value;
+    }
+
+    fn draw(&mut self, x_register: u8, y_register: u8, height: u8) {
+        let x = (self.registers[usize::from(x_register)] % 64) as usize;
+        let y = (self.registers[usize::from(y_register)] % 32) as usize;
+
+        // set VF register to 0 until any pixel become 0
+        self.registers[0xF] = 0;
+
+        for h in 0..height {
+            let sprite_row = self.ram[usize::from(self.i + (h as u16))];
+            let display_row = self.get_display_row(x, y);
+            let new_row = sprite_row ^ display_row;
+            let turned_off_pixels = display_row & sprite_row;
+            if turned_off_pixels > 0 {
+                self.registers[0xF] = 1;
+            }
+            self.set_display_row(x, y, new_row);
+        }
+    }
+
+    fn set_display_row(&mut self, x: usize, y: usize, row: u8) {
+        for bit in 0..8 {
+            if (x + bit) < self.display.len() && y < self.display[(x + bit)].len() {
+                self.display[(x + bit)][y] = (row & (1 << (7 - bit))) > 0;
+            }
+        }
+    }
+
+    fn get_display_row(&mut self, x: usize, y: usize) -> u8 {
+        let mut result: u8 = 0;
+        for bit in 0..8 {
+            if (x + bit) < self.display.len() && y < self.display[(x + bit)].len() {
+                result += (self.display[(x + bit)][y] as u8) << bit;
+            }
+        }
+        return result;
+    }
+
+    fn display(display: [[bool; 32]; 64]) {
+        for x in 0..display.len() {
+            for y in 0..display[x].len() {
+                let pixel = display[x][y];
+                if pixel {
+                    print!(".");
+                } else {
+                    print!(" ");
+                }
+            }
+            println!(" ");
+        }
+    }
+
     fn execute(&mut self) -> Result<(), String> {
         loop {
             // read the instruction pointed from the pc:
-            let (first_nibble, second_nibble) = self.fetch_instruction();
-            let (third_nibble, fourth_nibble) = self.fetch_instruction();
+            let instruction = self.fetch_instruction()?;
 
-            match first_nibble {
+            println!("DEBUG Instruction: {}", instruction.to_string());
+
+            match instruction.first_nibble {
                 0x0 => {
-                    match second_nibble {
+                    match instruction.second_nibble {
                         0x0 => {
-                            match third_nibble {
+                            match instruction.third_nibble {
                                 0xE => {
-                                    match fourth_nibble {
+                                    match instruction.fourth_nibble {
                                         0x0 => {
                                             self.clear_screen()
                                         }
@@ -109,57 +192,41 @@ impl Chip8 {
                             }
                         }
 
-                        _ => {
-
-                        }
+                        _ => {}
                     }
                 }
 
                 0x1 => {
-                    self.jump((u16::from(second_nibble) << 8) + (u16::from(third_nibble) << 4) + u16::from(fourth_nibble));
+                    self.jump(Instruction::byte_sum_3(instruction.second_nibble, instruction.third_nibble, instruction.fourth_nibble));
                 }
 
                 0x6 => {
+                    self.set_register(instruction.second_nibble, Instruction::byte_sum_2(instruction.third_nibble, instruction.fourth_nibble));
+                }
 
+                0x7 => {
+                    self.add_to_register(instruction.second_nibble, Instruction::byte_sum_2(instruction.third_nibble, instruction.fourth_nibble));
+                }
+
+                0xA => {
+                    self.set_index_register(Instruction::byte_sum_3(instruction.second_nibble, instruction.third_nibble, instruction.fourth_nibble));
+                }
+
+                0xD => {
+                    self.draw(instruction.second_nibble, instruction.third_nibble, instruction.fourth_nibble);
+                    // Chip8::display(self.display);
                 }
 
                 _ => {
-                    return Err(String::from("Unknown instruction"));
+                    return Err(format!("Unknown instruction: {}", instruction.first_nibble));
                 }
             }
         }
     }
-
-    fn fetch_instruction(&mut self) -> (u8, u8) {
-        let instruction = self.ram[self.pc as usize];
-        self.pc = self.pc + 1;
-
-        let first_nibble = instruction << 4;
-        let second_nibble = instruction >> 4;
-
-        return (first_nibble, second_nibble);
-    }
 }
-
 
 fn main() {
     let mut chip8 = Chip8::new();
-    chip8.load_rom(String::from("roms/IBM Logo.ch8"));
-
-    chip8.execute();
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn shift_left() {
-        let a: u8 = 255;
-        assert_eq!(15, (a >> 4));
-    }
-
-    #[test]
-    fn shift_right() {
-        let a: u8 = 255;
-        assert_eq!(240, (a << 4));
-    }
+    chip8.load_rom(String::from("roms/IBM Logo.ch8")).expect("File to exists.");
+    chip8.execute().expect("OH NO!");
 }
