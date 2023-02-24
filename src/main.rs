@@ -1,9 +1,10 @@
-pub mod instruction;
-
 use std::fs::File;
 use std::io;
 use std::io::{BufReader, Read};
+
 use crate::instruction::Instruction;
+
+pub mod instruction;
 
 struct Chip8 {
     ram: [u8; 4096],
@@ -98,6 +99,23 @@ impl Chip8 {
         self.pc = self.stack.pop().unwrap();
     }
 
+    fn call_subroutine(&mut self, address: u16) {
+        self.stack.push(self.pc);
+        self.pc = address;
+    }
+
+    fn skip_if_equals(&mut self, a: u8, b: u8) {
+        if a == b {
+            self.pc += 2;
+        }
+    }
+
+    fn skip_if_not_equals(&mut self, a: u8, b: u8) {
+        if a != b {
+            self.pc += 2;
+        }
+    }
+
     fn jump(&mut self, location: u16) {
         self.pc = location;
     }
@@ -152,7 +170,6 @@ impl Chip8 {
     }
 
     fn display(display: [[bool; 32]; 64]) {
-        println!("----------------------------------------------------------------");
         for y in 0..display[0].len() {
             for x in 0..display.len() {
                 let pixel = display[x][y];
@@ -164,7 +181,6 @@ impl Chip8 {
             }
             println!("_");
         }
-        println!("----------------------------------------------------------------");
     }
 
     fn execute(&mut self) -> Result<(), String> {
@@ -202,12 +218,32 @@ impl Chip8 {
                     self.jump(Instruction::byte_sum_3(instruction.second_nibble, instruction.third_nibble, instruction.fourth_nibble));
                 }
 
+                0x2 => {
+                    self.call_subroutine(Instruction::byte_sum_3(instruction.second_nibble, instruction.third_nibble, instruction.fourth_nibble));
+                }
+
+                0x3 => {
+                    self.skip_if_equals(self.registers[instruction.second_nibble as usize], Instruction::byte_sum_2(instruction.third_nibble, instruction.fourth_nibble));
+                }
+
+                0x4 => {
+                    self.skip_if_not_equals(self.registers[instruction.second_nibble as usize], Instruction::byte_sum_2(instruction.third_nibble, instruction.fourth_nibble));
+                }
+
+                0x5 => {
+                    self.skip_if_equals(self.registers[instruction.second_nibble as usize], self.registers[instruction.third_nibble as usize]);
+                }
+
                 0x6 => {
                     self.set_register(instruction.second_nibble, Instruction::byte_sum_2(instruction.third_nibble, instruction.fourth_nibble));
                 }
 
                 0x7 => {
                     self.add_to_register(instruction.second_nibble, Instruction::byte_sum_2(instruction.third_nibble, instruction.fourth_nibble));
+                }
+
+                0x9 => {
+                    self.skip_if_not_equals(self.registers[instruction.second_nibble as usize], self.registers[instruction.third_nibble as usize]);
                 }
 
                 0xA => {
