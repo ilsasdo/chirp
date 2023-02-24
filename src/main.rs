@@ -70,13 +70,13 @@ impl Chip8 {
         reader.read_to_end(&mut buffer).unwrap();
 
         // load to ram
-        let mut i = 200;
+        let mut i = 0x200;
         for value in buffer {
             self.ram[i] = value;
             i = i + 1;
         }
 
-        self.pc = 200;
+        self.pc = 0x200;
         Ok(())
     }
 
@@ -121,15 +121,16 @@ impl Chip8 {
         // set VF register to 0 until any pixel become 0
         self.registers[0xF] = 0;
 
-        for h in 0..height {
+        for h in 0..(height as usize) {
             let sprite_row = self.ram[usize::from(self.i + (h as u16))];
-            let display_row = self.get_display_row(x, y);
+            let display_row = self.get_display_row(x, y + h);
             let new_row = sprite_row ^ display_row;
             let turned_off_pixels = display_row & sprite_row;
             if turned_off_pixels > 0 {
                 self.registers[0xF] = 1;
             }
-            self.set_display_row(x, y, new_row);
+            self.set_display_row(x, y + h, new_row);
+            Chip8::display(self.display);
         }
     }
 
@@ -152,17 +153,19 @@ impl Chip8 {
     }
 
     fn display(display: [[bool; 32]; 64]) {
-        for x in 0..display.len() {
-            for y in 0..display[x].len() {
+        println!("----------------------------------------------------------------");
+        for y in 0..display[0].len() {
+            for x in 0..display.len() {
                 let pixel = display[x][y];
                 if pixel {
-                    print!(".");
+                    print!("#");
                 } else {
-                    print!(" ");
+                    print!("_");
                 }
             }
-            println!(" ");
+            println!("_");
         }
+        println!("----------------------------------------------------------------");
     }
 
     fn execute(&mut self) -> Result<(), String> {
@@ -170,7 +173,7 @@ impl Chip8 {
             // read the instruction pointed from the pc:
             let instruction = self.fetch_instruction()?;
 
-            println!("DEBUG Instruction: {}, pc: {}", instruction.to_string(), self.pc);
+            // println!("DEBUG Instruction: {}, pc: {}", instruction.to_string(), self.pc);
 
             match instruction.first_nibble {
                 0x0 => {
@@ -214,7 +217,7 @@ impl Chip8 {
 
                 0xD => {
                     self.draw(instruction.second_nibble, instruction.third_nibble, instruction.fourth_nibble);
-                    // Chip8::display(self.display);
+                    Chip8::display(self.display);
                 }
 
                 _ => {
