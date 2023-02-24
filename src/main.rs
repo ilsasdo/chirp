@@ -130,7 +130,6 @@ impl Chip8 {
                 self.registers[0xF] = 1;
             }
             self.set_display_row(x, y + h, new_row);
-            Chip8::display(self.display);
         }
     }
 
