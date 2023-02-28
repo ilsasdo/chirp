@@ -2,11 +2,13 @@ use std::fs::File;
 use std::io;
 use std::io::{BufReader, Read};
 
+use rand::Rng;
+
 use crate::instruction::Instruction;
 
 pub mod instruction;
 
-struct Chip8 {
+struct Chip8<T: Input, D: Display> {
     ram: [u8; 4096],
     display: [[bool; 32]; 64],
     pc: u16,
@@ -16,14 +18,57 @@ struct Chip8 {
     sound_timer: u8,
     registers: [u8; 16],
     options: Chip8Options,
+    input: T,
+    display_output: D,
+}
+
+pub trait Input {
+    fn wait(&self) -> u8;
+
+    fn current_value(&self) -> u8;
+}
+
+
+pub trait Display {
+    fn draw(&self, display: [[bool; 32]; 64]);
+}
+
+struct ConsoleDisplay {}
+
+impl Display for ConsoleDisplay {
+    fn draw(&self, display: [[bool; 32]; 64]) {
+        for y in 0..display[0].len() {
+            for x in 0..display.len() {
+                let pixel = display[x][y];
+                if pixel {
+                    print!("#");
+                } else {
+                    print!("_");
+                }
+            }
+            println!("_");
+        }
+    }
+}
+
+struct DummyInput {}
+
+impl Input for DummyInput {
+    fn wait(&self) -> u8 {
+        todo!()
+    }
+
+    fn current_value(&self) -> u8 {
+        todo!()
+    }
 }
 
 struct Chip8Options {
     super_chip: bool,
 }
 
-impl Chip8 {
-    fn new() -> Chip8 {
+impl<T: Input, D: Display> Chip8<T, D> {
+    fn new(input: T, display: D) -> Chip8<T, D> {
         let mut chip8 = Chip8 {
             ram: [0x0; 4096],
             display: [[false; 32]; 64],
@@ -36,6 +81,8 @@ impl Chip8 {
             options: Chip8Options {
                 super_chip: false
             },
+            input,
+            display_output: display,
         };
 
         let fonts: [u8; 80] = [0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -128,6 +175,10 @@ impl Chip8 {
         self.pc = location;
     }
 
+    fn jump_with_offset(&mut self, location: u16) {
+        self.jump((self.register_get_value(0x0) as u16) + location);
+    }
+
     fn register_set_value(&mut self, register: u8, value: u8) {
         self.registers[usize::from(register)] = value;
     }
@@ -144,7 +195,7 @@ impl Chip8 {
         self.registers[register_a as usize] = self.registers[register_b as usize];
     }
 
-    fn register_get_value(self, register: u8) -> u8 {
+    fn register_get_value(&self, register: u8) -> u8 {
         return self.registers[register as usize];
     }
 
@@ -191,12 +242,26 @@ impl Chip8 {
         self.register_set_value(register_a, self.register_get_value(register_a) >> 1);
     }
 
+    fn skip_if_key_pressed_is(&mut self, register: u8) {
+        let value = self.register_get_value(register);
+        if value == self.input.current_value() {
+            self.pc += 2;
+        }
+    }
+
+    fn skip_if_key_pressed_is_not(&mut self, register: u8) {
+        let value = self.register_get_value(register);
+        if value != self.input.current_value() {
+            self.pc += 2;
+        }
+    }
+
     fn draw(&mut self, x_register: u8, y_register: u8, height: u8) {
         let x = (self.registers[usize::from(x_register)] % 64) as usize;
         let y = (self.registers[usize::from(y_register)] % 32) as usize;
 
         // set VF register to 0 until any pixel become 0
-        self.registers[0xF] = 0;
+        self.register_set_value(0xF, 0);
 
         for h in 0..(height as usize) {
             let sprite_row = self.ram[usize::from(self.i + (h as u16))];
@@ -204,7 +269,7 @@ impl Chip8 {
             let new_row = sprite_row ^ display_row;
             let turned_off_pixels = display_row & sprite_row;
             if turned_off_pixels > 0 {
-                self.registers[0xF] = 1;
+                self.register_set_value(0xF, 1);
             }
             self.set_display_row(x, y + h, new_row);
         }
@@ -218,6 +283,32 @@ impl Chip8 {
         }
     }
 
+    fn random(&mut self, register: u8, value: u8) {
+        let mut rng = rand::thread_rng();
+        self.register_set_value(register, rng.gen::<u8>() & value);
+    }
+
+    fn set_delay_timer(&mut self, register: u8) {
+        self.delay_timer = self.register_get_value(register);
+    }
+
+    fn set_sound_timer(&mut self, register: u8) {
+        self.sound_timer = self.register_get_value(register);
+    }
+
+    fn add_to_index(&mut self, register: u8) {
+        let i = self.i;
+        let value = self.register_get_value(register) as u16;
+
+        self.i = i + value;
+        if (i + value) > 0x255 {
+            self.register_set_value(0xF, 1)
+        } else {
+            // TODO: it's unclear if I have to reset to zero in case of non-overflow.
+            self.register_set_value(0xF, 0)
+        }
+    }
+
     fn get_display_row(&mut self, x: usize, y: usize) -> u8 {
         let mut result: u8 = 0;
         for bit in 0..8 {
@@ -226,20 +317,6 @@ impl Chip8 {
             }
         }
         return result;
-    }
-
-    fn display(display: [[bool; 32]; 64]) {
-        for y in 0..display[0].len() {
-            for x in 0..display.len() {
-                let pixel = display[x][y];
-                if pixel {
-                    print!("#");
-                } else {
-                    print!("_");
-                }
-            }
-            println!("_");
-        }
     }
 
     fn execute(&mut self) -> Result<(), String> {
@@ -338,11 +415,38 @@ impl Chip8 {
                 }
 
                 0xB => {
+                    self.jump_with_offset(instruction.byte_sum_3());
+                }
+
+                0xC => {
+                    self.random(instruction.second_nibble, instruction.byte_sum_2());
                 }
 
                 0xD => {
                     self.draw(instruction.second_nibble, instruction.third_nibble, instruction.fourth_nibble);
-                    Chip8::display(self.display);
+                    self.display_output.draw(self.display);
+                }
+
+                0xE => {
+                    if instruction.byte_sum_2() == 0x9E {
+                        self.skip_if_key_pressed_is(instruction.second_nibble)
+                    } else if instruction.byte_sum_2() == 0xA1 {
+                        self.skip_if_key_pressed_is_not(instruction.second_nibble)
+                    }
+                }
+
+                0xF => {
+                    if instruction.byte_sum_2() == 0x07 {
+                        self.register_set_value(instruction.second_nibble, self.delay_timer);
+                    } else if instruction.byte_sum_2() == 0x15 {
+                        self.set_delay_timer(instruction.second_nibble);
+                    } else if instruction.byte_sum_2() == 0x18 {
+                        self.set_sound_timer(instruction.second_nibble);
+                    } else if instruction.byte_sum_2() == 0x1E {
+                        self.add_to_index(instruction.second_nibble);
+                    } else if instruction.byte_sum_2() == 0x0A {
+                        self.input.wait();
+                    }
                 }
 
                 _ => {
@@ -354,7 +458,7 @@ impl Chip8 {
 }
 
 fn main() {
-    let mut chip8 = Chip8::new();
+    let mut chip8 = Chip8::new(DummyInput::new(), ConsoleDisplay{});
     chip8.load_rom(String::from("roms/IBM Logo.ch8")).expect("File to exists.");
     chip8.execute().expect("OH NO!");
 }
