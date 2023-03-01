@@ -1,6 +1,6 @@
 use std::fmt;
 
-pub struct Instruction {
+pub(crate) struct Instruction {
     first_byte: u8,
     second_byte: u8,
     pub first_nibble: u8,
