@@ -1,8 +1,12 @@
+use std::{io, thread};
 use std::fs::File;
-use std::io;
 use std::io::{BufReader, Read};
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
 
 use rand::Rng;
+
 use crate::cpu::instruction::Instruction;
 
 mod instruction;
@@ -43,7 +47,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
             pc: 0,
             i: 0,
             stack: Vec::new(),
-            delay_timer: 0,
+            delay_timer: 0xF,
             sound_timer: 0,
             registers: [0x0; 16],
             options: Chip8Options {
@@ -288,31 +292,22 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     pub fn execute(&mut self) -> Result<(), String> {
+        let (delay_timer_tx, delay_timer_rx) = timer(self.delay_timer);
+        let (sound_timer_tx, sound_timer_rx) = timer(self.sound_timer);
+
         loop {
+            self.delay_timer = delay_timer_rx.try_recv().unwrap_or(self.delay_timer);
+            self.sound_timer = sound_timer_rx.try_recv().unwrap_or(self.sound_timer);
+
             // read the instruction pointed from the pc:
             let instruction = self.fetch_instruction()?;
 
             match instruction.first_nibble {
                 0x0 => {
-                    match instruction.second_nibble {
-                        0x0 => {
-                            match instruction.third_nibble {
-                                0xE => {
-                                    match instruction.fourth_nibble {
-                                        0x0 => {
-                                            self.clear_screen()
-                                        }
-                                        0xE => {
-                                            self.subroutine_return()
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        _ => {}
+                    if instruction.byte_sum_3() == 0x0E0 {
+                        self.clear_screen();
+                    } else if instruction.byte_sum_3() == 0x0EE {
+                        self.subroutine_return();
                     }
                 }
 
@@ -407,9 +402,9 @@ impl<T: Input, D: Display> Chip8<T, D> {
                     if instruction.byte_sum_2() == 0x07 {
                         self.register_set_value(instruction.second_nibble, self.delay_timer);
                     } else if instruction.byte_sum_2() == 0x15 {
-                        self.set_delay_timer(instruction.second_nibble);
+                        delay_timer_tx.send(self.register_get_value(instruction.second_nibble)).unwrap();
                     } else if instruction.byte_sum_2() == 0x18 {
-                        self.set_sound_timer(instruction.second_nibble);
+                        sound_timer_tx.send(self.register_get_value(instruction.second_nibble)).unwrap();
                     } else if instruction.byte_sum_2() == 0x1E {
                         self.add_to_index(instruction.second_nibble);
                     } else if instruction.byte_sum_2() == 0x0A {
@@ -423,4 +418,24 @@ impl<T: Input, D: Display> Chip8<T, D> {
             }
         }
     }
+}
+
+fn timer(start_from: u8) -> (Sender<u8>, Receiver<u8>) {
+    let (get_display_tx, get_display_rx): (Sender<u8>, Receiver<u8>) = mpsc::channel();
+    let (set_display_tx, set_display_rx): (Sender<u8>, Receiver<u8>) = mpsc::channel();
+
+    let mut delay = start_from;
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_millis(1000 / 60));
+
+            delay = set_display_rx.try_recv().unwrap_or(delay);
+            if delay > 0 {
+                delay = delay - 1;
+                get_display_tx.send(delay).unwrap();
+            }
+        }
+    });
+
+    return (set_display_tx, get_display_rx)
 }
