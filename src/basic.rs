@@ -25,7 +25,7 @@ impl Input for DummyInput {
         todo!()
     }
 
-    fn current_value(&self) -> u8 {
+    fn current_value(&self) -> Option<u8> {
         todo!()
     }
 }

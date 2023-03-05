@@ -1,5 +1,5 @@
 use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, RecvError, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -12,7 +12,10 @@ use crate::cpu::{Display, Input};
 
 pub struct SdlDisplay {
     display_tx: Sender<[[bool; 32]; 64]>,
-    input_rx: Receiver<u8>
+}
+
+pub struct SdlInput {
+    input_rx: Receiver<u8>,
 }
 
 fn to_sdl_rect(display: [[bool; 32]; 64], width: u32, height: u32) -> Vec<Rect> {
@@ -32,14 +35,22 @@ fn to_sdl_rect(display: [[bool; 32]; 64], width: u32, height: u32) -> Vec<Rect> 
     return rects;
 }
 
-impl SdlDisplay {
-    pub fn new() -> (SdlDisplay, Sender<u8>, Receiver<[[bool; 32]; 64]>) {
-        let (display_tx, display_rx): (Sender<[[bool; 32]; 64]>, Receiver<[[bool; 32]; 64]>) = mpsc::channel();
+impl SdlInput {
+    pub fn new() -> (SdlInput, Sender<u8>) {
         let (input_tx, input_rx): (Sender<u8>, Receiver<u8>) = mpsc::channel();
+        return (SdlInput {
+            input_rx
+        }, input_tx);
+    }
+}
+
+impl SdlDisplay {
+    pub fn new() -> (SdlDisplay, Receiver<[[bool; 32]; 64]>) {
+        let (display_tx, display_rx): (Sender<[[bool; 32]; 64]>, Receiver<[[bool; 32]; 64]>) = mpsc::channel();
 
         return (SdlDisplay {
-            display_tx, input_rx
-        }, input_tx, display_rx)
+            display_tx
+        }, display_rx);
     }
 
     pub fn run(title: String, width: u32, height: u32, tx: Sender<u8>, rx: Receiver<[[bool; 32]; 64]>) {
@@ -71,56 +82,56 @@ impl SdlDisplay {
             for event in event_pump.poll_iter() {
                 match event {
                     Event::Quit { .. } |
-                    Event::KeyDown { keycode: Some(Keycode::Escape), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                         break 'running;
                     }
-                    Event::KeyDown { keycode: Some(Keycode::A), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::Z), .. } => {
                         tx.send(0xA).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::B), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::C), .. } => {
                         tx.send(0xB).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::C), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::Num4), .. } => {
                         tx.send(0xC).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::D), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::R), .. } => {
                         tx.send(0xD).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::E), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::F), .. } => {
                         tx.send(0xE).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::F), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::V), .. } => {
                         tx.send(0xF).unwrap();
                     }
 
-                    Event::KeyDown { keycode: Some(Keycode::Num0), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::X), .. } => {
                         tx.send(0x0).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num1), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::Num1), .. } => {
                         tx.send(0x1).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num2), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::Num2), .. } => {
                         tx.send(0x2).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num3), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::Num3), .. } => {
                         tx.send(0x3).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num4), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::Q), .. } => {
                         tx.send(0x4).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num5), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::W), .. } => {
                         tx.send(0x5).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num6), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::E), .. } => {
                         tx.send(0x6).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num7), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::A), .. } => {
                         tx.send(0x7).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num8), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::S), .. } => {
                         tx.send(0x8).unwrap();
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Num9), .. }  => {
+                    Event::KeyDown { keycode: Some(Keycode::D), .. } => {
                         tx.send(0x9).unwrap();
                     }
                     _ => {}
@@ -138,12 +149,19 @@ impl Display for SdlDisplay {
     }
 }
 
-impl Input for SdlDisplay {
+impl Input for SdlInput {
     fn wait(&self) -> u8 {
-        todo!()
+        return self.input_rx.recv().unwrap();
     }
 
-    fn current_value(&self) -> u8 {
-        todo!()
+    fn current_value(&self) -> Option<u8> {
+        return match self.input_rx.recv() {
+            Ok(key) => {
+                Some(key)
+            }
+            Err(_) => {
+                None
+            }
+        };
     }
 }

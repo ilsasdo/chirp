@@ -1,7 +1,7 @@
 use std::{io, thread};
 use std::fs::File;
 use std::io::{BufReader, Read};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
@@ -11,6 +11,9 @@ use crate::cpu::instruction::Instruction;
 
 mod instruction;
 
+const FONT_OFFSET: u8 = 50;
+const MEM_OFFSET: u16 = 0x200;
+
 pub trait Display {
     fn draw(&self, display: [[bool; 32]; 64]);
 }
@@ -18,7 +21,7 @@ pub trait Display {
 pub trait Input {
     fn wait(&self) -> u8;
 
-    fn current_value(&self) -> u8;
+    fn current_value(&self) -> Option<u8>;
 }
 
 pub struct Chip8<T: Input, D: Display> {
@@ -27,8 +30,8 @@ pub struct Chip8<T: Input, D: Display> {
     pc: u16,
     i: u16,
     stack: Vec<u16>,
-    delay_timer: u8,
-    sound_timer: u8,
+    delay_timer: Arc<Mutex<u8>>,
+    sound_timer: Arc<Mutex<u8>>,
     registers: [u8; 16],
     options: Chip8Options,
     input: T,
@@ -47,8 +50,8 @@ impl<T: Input, D: Display> Chip8<T, D> {
             pc: 0,
             i: 0,
             stack: Vec::new(),
-            delay_timer: 0xF,
-            sound_timer: 0,
+            delay_timer: Arc::new(Mutex::new(0x0)),
+            sound_timer: Arc::new(Mutex::new(0x0)),
             registers: [0x0; 16],
             options: Chip8Options {
                 super_chip: false
@@ -75,7 +78,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
             0xF0, 0x80, 0xF0, 0x80, 0x80];  // F
 
         for (i, e) in fonts.iter().enumerate() {
-            chip8.ram[i + 50] = *e;
+            chip8.ram[i + (FONT_OFFSET as usize)] = *e;
         }
 
         return chip8;
@@ -98,13 +101,13 @@ impl<T: Input, D: Display> Chip8<T, D> {
         reader.read_to_end(&mut buffer).unwrap();
 
         // load to ram
-        let mut i = 0x200;
+        let mut i = MEM_OFFSET as usize;
         for value in buffer {
             self.ram[i] = value;
             i = i + 1;
         }
 
-        self.pc = 0x200;
+        self.pc = MEM_OFFSET;
         Ok(())
     }
 
@@ -216,15 +219,29 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
     fn skip_if_key_pressed_is(&mut self, register: u8) {
         let value = self.register_get_value(register);
-        if value == self.input.current_value() {
-            self.pc += 2;
+        match self.input.current_value() {
+            None => {
+                // do nothing
+            }
+            Some(key) => {
+                if key == value {
+                    self.pc += 2;
+                }
+            }
         }
     }
 
     fn skip_if_key_pressed_is_not(&mut self, register: u8) {
         let value = self.register_get_value(register);
-        if value != self.input.current_value() {
-            self.pc += 2;
+        match self.input.current_value() {
+            None => {
+                // do nothing
+            }
+            Some(key) => {
+                if key != value {
+                    self.pc += 2;
+                }
+            }
         }
     }
 
@@ -255,17 +272,25 @@ impl<T: Input, D: Display> Chip8<T, D> {
         }
     }
 
+    fn register_set_value_to_delay_timer(&mut self, register: u8) {
+        let c = Arc::clone(&self.delay_timer);
+        let t = c.lock().unwrap();
+        self.register_set_value(register, *t);
+    }
+
     fn random(&mut self, register: u8, value: u8) {
         let mut rng = rand::thread_rng();
         self.register_set_value(register, rng.gen::<u8>() & value);
     }
 
     fn set_delay_timer(&mut self, register: u8) {
-        self.delay_timer = self.register_get_value(register);
+        let mut dt = self.delay_timer.lock().unwrap();
+        *dt = self.register_get_value(register);
     }
 
     fn set_sound_timer(&mut self, register: u8) {
-        self.sound_timer = self.register_get_value(register);
+        let mut st = self.sound_timer.lock().unwrap();
+        *st = self.register_get_value(register);
     }
 
     fn add_to_index(&mut self, register: u8) {
@@ -281,6 +306,33 @@ impl<T: Input, D: Display> Chip8<T, D> {
         }
     }
 
+    fn set_index_register_to_font(&mut self, font: u8) {
+        let f = font & 0xF;
+        self.set_index_register((f + FONT_OFFSET) as u16);
+    }
+
+    fn decimal_conversion(&mut self, register:u8) {
+        let value = self.register_get_value(register);
+        let units = value % 10;
+        let tens = value / 10;
+        let hundreds = tens / 10;
+        self.ram[self.i as usize] = hundreds;
+        self.ram[self.i as usize + 1] = tens;
+        self.ram[self.i as usize + 2] = units;
+    }
+
+    fn ram_store(&mut self, value:u8) {
+        for x in 0..=(value as u16) {
+            self.ram[(self.i + x) as usize] = self.register_get_value(x as u8);
+        }
+    }
+
+    fn ram_load(&mut self, value:u8) {
+        for x in 0..=(value as u16) {
+            self.register_set_value(x as u8, self.ram[(self.i + x) as usize]);
+        }
+    }
+
     fn get_display_row(&mut self, x: usize, y: usize) -> u8 {
         let mut result: u8 = 0;
         for bit in 0..8 {
@@ -292,13 +344,10 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     pub fn execute(&mut self) -> Result<(), String> {
-        let (delay_timer_tx, delay_timer_rx) = timer(self.delay_timer);
-        let (sound_timer_tx, sound_timer_rx) = timer(self.sound_timer);
+        timer(Arc::clone(&self.delay_timer));
+        timer(Arc::clone(&self.sound_timer));
 
         loop {
-            self.delay_timer = delay_timer_rx.try_recv().unwrap_or(self.delay_timer);
-            self.sound_timer = sound_timer_rx.try_recv().unwrap_or(self.sound_timer);
-
             // read the instruction pointed from the pc:
             let instruction = self.fetch_instruction()?;
 
@@ -400,15 +449,23 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
                 0xF => {
                     if instruction.byte_sum_2() == 0x07 {
-                        self.register_set_value(instruction.second_nibble, self.delay_timer);
+                        self.register_set_value_to_delay_timer(instruction.second_nibble);
                     } else if instruction.byte_sum_2() == 0x15 {
-                        delay_timer_tx.send(self.register_get_value(instruction.second_nibble)).unwrap();
+                        self.set_delay_timer(self.register_get_value(instruction.second_nibble));
                     } else if instruction.byte_sum_2() == 0x18 {
-                        sound_timer_tx.send(self.register_get_value(instruction.second_nibble)).unwrap();
+                        self.set_sound_timer(self.register_get_value(instruction.second_nibble));
                     } else if instruction.byte_sum_2() == 0x1E {
                         self.add_to_index(instruction.second_nibble);
                     } else if instruction.byte_sum_2() == 0x0A {
                         self.input.wait();
+                    } else if instruction.byte_sum_2() == 0x29 {
+                        self.set_index_register_to_font(instruction.second_nibble);
+                    } else if instruction.byte_sum_2() == 0x33 {
+                        self.decimal_conversion(instruction.second_nibble);
+                    } else if instruction.byte_sum_2() == 0x55 {
+                        self.ram_store(instruction.second_nibble);
+                    } else if instruction.byte_sum_2() == 0x56 {
+                        self.ram_load(instruction.second_nibble);
                     }
                 }
 
@@ -420,22 +477,14 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 }
 
-fn timer(start_from: u8) -> (Sender<u8>, Receiver<u8>) {
-    let (get_display_tx, get_display_rx): (Sender<u8>, Receiver<u8>) = mpsc::channel();
-    let (set_display_tx, set_display_rx): (Sender<u8>, Receiver<u8>) = mpsc::channel();
-
-    let mut delay = start_from;
+fn timer(delay: Arc<Mutex<u8>>) {
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_millis(1000 / 60));
-
-            delay = set_display_rx.try_recv().unwrap_or(delay);
-            if delay > 0 {
-                delay = delay - 1;
-                get_display_tx.send(delay).unwrap();
+            let mut d = delay.lock().unwrap();
+            if *d > 0 {
+                *d -= 1;
             }
         }
     });
-
-    return (set_display_tx, get_display_rx)
 }

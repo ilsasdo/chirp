@@ -1,17 +1,19 @@
 use std::thread;
 use crate::basic::{DummyInput};
 use crate::cpu::{Chip8};
-use crate::sdl::SdlDisplay;
+use crate::sdl::{SdlDisplay, SdlInput};
 
 pub mod cpu;
 mod sdl;
 mod basic;
 
 fn main() {
-    let (sdl, input_tx, display_rx) = SdlDisplay::new();
-    let mut chip8 = Chip8::new(DummyInput {}, sdl);
+    let (sdl_display, display_rx) = SdlDisplay::new();
+    let (sdl_input, input_tx) = SdlInput::new();
+
+    let mut chip8 = Chip8::new(sdl_input, sdl_display);
     thread::spawn(move || {
-        chip8.load_rom(String::from("roms/Clock Program [Bill Fisher, 1981].ch8")).expect("File to exists.");
+        chip8.load_rom(String::from("roms/test_opcode.ch8")).expect("File to exists.");
         chip8.execute().expect("OH NO!");
     });
 
