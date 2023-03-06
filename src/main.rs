@@ -13,7 +13,7 @@ fn main() {
 
     let mut chip8 = Chip8::new(sdl_input, sdl_display);
     thread::spawn(move || {
-        chip8.load_rom(String::from("roms/Particle Demo [zeroZshadow, 2008].ch8")).expect("File to exists.");
+        chip8.load_rom(String::from("roms/br8kout.ch8")).expect("File to exists.");
         chip8.execute().expect("OH NO!");
     });
 
