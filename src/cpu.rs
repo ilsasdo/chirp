@@ -163,7 +163,10 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     fn register_add_value(&mut self, register: u8, value: u8) {
-        self.registers[usize::from(register)] += value;
+        let a : u8 = self.registers[register as usize] ;
+        let b : u8 = value;
+        let (sum, _overflows) = a.overflowing_add(b);
+        self.registers[usize::from(register)] = sum;
     }
 
     fn register_set(&mut self, register_a: u8, register_b: u8) {
@@ -171,7 +174,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     fn register_get_value(&self, register: u8) -> u8 {
-        return self.registers[register as usize];
+        return self.registers[(register as usize) & 0xF];
     }
 
     fn register_or(&mut self, register_a: u8, register_b: u8) {
@@ -187,18 +190,20 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     fn register_add(&mut self, register_a: u8, register_b: u8) {
-        let a = self.registers[register_a as usize] as u16;
-        let b = self.registers[register_b as usize] as u16;
+        let a = self.registers[register_a as usize];
+        let b = self.registers[register_b as usize];
+        let (result, overflows) = a.overflowing_add(b);
 
-        self.registers[register_a as usize] = (a + b) as u8;
-        self.registers[0xF] = if (a + b) > 255u16 { 1 } else { 0 };
+        self.registers[register_a as usize] = result;
+        self.registers[0xF] = if overflows { 1 } else { 0 };
     }
 
     fn register_subtract(&mut self, register_a: u8, register_b: u8) {
-        let value_a = self.registers[register_a as usize];
-        let value_b = self.registers[register_b as usize];
-        self.registers[0xF] = if value_a >= value_b { 1 } else { 0 };
-        self.registers[register_a as usize] = value_a - value_b;
+        let a = self.registers[register_a as usize] as u16;
+        let b = self.registers[register_b as usize] as u16;
+        let (result, overflows) = a.overflowing_sub(b);
+        self.registers[0xF] = if overflows { 1 } else { 0 };
+        self.registers[register_a as usize] = result as u8;
     }
 
     fn register_left_shift(&mut self, register_a: u8, register_b: u8) {
@@ -314,8 +319,8 @@ impl<T: Input, D: Display> Chip8<T, D> {
     fn decimal_conversion(&mut self, register:u8) {
         let value = self.register_get_value(register);
         let units = value % 10;
-        let tens = value / 10;
-        let hundreds = tens / 10;
+        let tens = (value / 10) % 10;
+        let hundreds = (value / 100);
         self.ram[self.i as usize] = hundreds;
         self.ram[self.i as usize + 1] = tens;
         self.ram[self.i as usize + 2] = units;
@@ -323,7 +328,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
     fn ram_store(&mut self, value:u8) {
         for x in 0..=(value as u16) {
-            self.ram[(self.i + x) as usize] = self.register_get_value(x as u8);
+            self.ram[self.i as usize] = self.register_get_value(x as u8);
         }
     }
 
@@ -464,7 +469,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
                         self.decimal_conversion(instruction.second_nibble);
                     } else if instruction.byte_sum_2() == 0x55 {
                         self.ram_store(instruction.second_nibble);
-                    } else if instruction.byte_sum_2() == 0x56 {
+                    } else if instruction.byte_sum_2() == 0x65 {
                         self.ram_load(instruction.second_nibble);
                     }
                 }
@@ -487,4 +492,15 @@ fn timer(delay: Arc<Mutex<u8>>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn add_overflow() {
+        let a: u8 = 43u8;
+        let b: u8 = 255u8;
+
+        let (sum, overflow) = a.overflowing_add(b);
+    }
 }
