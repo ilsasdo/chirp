@@ -134,7 +134,9 @@ impl SdlDisplay {
                     Event::KeyDown { keycode: Some(Keycode::D), .. } => {
                         tx.send(0x9).unwrap();
                     }
-                    _ => {}
+                    _ => {
+                        println!("No key pressed");
+                    }
                 }
             }
 
@@ -157,6 +159,7 @@ impl Input for SdlInput {
     fn current_value(&self) -> Option<u8> {
         return match self.input_rx.recv() {
             Ok(key) => {
+                println!("Keycode: {}", key);
                 Some(key)
             }
             Err(_) => {

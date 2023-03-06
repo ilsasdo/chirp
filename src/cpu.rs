@@ -92,7 +92,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
         }
     }
 
-    pub(crate) fn load_rom(&mut self, rom: String) -> io::Result<()> {
+    pub(crate) fn load_rom_file(&mut self, rom: String) -> io::Result<()> {
         let file = File::open(rom)?;
         let mut reader = BufReader::new(file);
         let mut buffer = Vec::new();
@@ -101,6 +101,12 @@ impl<T: Input, D: Display> Chip8<T, D> {
         reader.read_to_end(&mut buffer).unwrap();
 
         // load to ram
+        self.load_rom_bytes(buffer);
+
+        Ok(())
+    }
+
+    pub(crate) fn load_rom_bytes(&mut self, buffer:Vec<u8>) {
         let mut i = MEM_OFFSET as usize;
         for value in buffer {
             self.ram[i] = value;
@@ -108,7 +114,6 @@ impl<T: Input, D: Display> Chip8<T, D> {
         }
 
         self.pc = MEM_OFFSET;
-        Ok(())
     }
 
     fn fetch_instruction(&mut self) -> Result<Instruction, String> {
@@ -251,8 +256,8 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     fn draw(&mut self, x_register: u8, y_register: u8, height: u8) {
-        let x = (self.registers[usize::from(x_register)] % 64) as usize;
-        let y = (self.registers[usize::from(y_register)] % 32) as usize;
+        let x = (self.register_get_value(x_register) % 64) as usize;
+        let y = (self.register_get_value(y_register) % 32) as usize;
 
         // set VF register to 0 until any pixel become 0
         self.register_set_value(0xF, 0);
@@ -260,13 +265,18 @@ impl<T: Input, D: Display> Chip8<T, D> {
         for h in 0..(height as usize) {
             let sprite_row = self.ram[usize::from(self.i + (h as u16))];
             let display_row = self.get_display_row(x, y + h);
-            let new_row = sprite_row ^ display_row;
-            let turned_off_pixels = display_row & sprite_row;
-            if turned_off_pixels > 0 {
+            let (new_row, collision) = self.draw_sprite_row(sprite_row, display_row);
+            if collision {
                 self.register_set_value(0xF, 1);
             }
             self.set_display_row(x, y + h, new_row);
         }
+    }
+
+    fn draw_sprite_row(&self, sprite_row: u8, display_row:u8) -> (u8, bool) {
+        let new_row = sprite_row ^ display_row;
+        let turned_off_pixels = display_row & sprite_row;
+        return (new_row, turned_off_pixels > 0)
     }
 
     fn set_display_row(&mut self, x: usize, y: usize, row: u8) {
@@ -328,7 +338,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
     fn ram_store(&mut self, value:u8) {
         for x in 0..=(value as u16) {
-            self.ram[self.i as usize] = self.register_get_value(x as u8);
+            self.ram[(self.i + x) as usize] = self.register_get_value(x as u8);
         }
     }
 
@@ -346,6 +356,11 @@ impl<T: Input, D: Display> Chip8<T, D> {
             }
         }
         return result;
+    }
+
+    fn get_key(&mut self, register:u8) {
+        let key = self.input.wait();
+        self.register_set_value(register, key);
     }
 
     pub fn execute(&mut self) -> Result<(), String> {
@@ -462,7 +477,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
                     } else if instruction.byte_sum_2() == 0x1E {
                         self.add_to_index(instruction.second_nibble);
                     } else if instruction.byte_sum_2() == 0x0A {
-                        self.input.wait();
+                        self.get_key(instruction.second_nibble);
                     } else if instruction.byte_sum_2() == 0x29 {
                         self.set_index_register_to_font(instruction.second_nibble);
                     } else if instruction.byte_sum_2() == 0x33 {
@@ -496,11 +511,30 @@ fn timer(delay: Arc<Mutex<u8>>) {
 
 #[cfg(test)]
 mod test {
-    #[test]
-    fn add_overflow() {
-        let a: u8 = 43u8;
-        let b: u8 = 255u8;
+    use crate::basic::DummyInput;
+    use crate::cpu::{Chip8, Display};
 
-        let (sum, overflow) = a.overflowing_add(b);
+    struct FakeDisplay {
+
+    }
+
+    impl Display for FakeDisplay {
+        fn draw(&self, display: [[bool; 32]; 64]) {
+
+        }
+    }
+
+    #[test]
+    fn draw_sprite_row() {
+        let input = DummyInput {};
+        let display = FakeDisplay { } ;
+        let mut cpu = Chip8::new(input, display);
+        let (row, collision) = cpu.draw_sprite_row(0x1,0x0);
+        assert_eq!(row, 0x1);
+        assert_eq!(collision, false);
+
+        let (row, collision) = cpu.draw_sprite_row(0x2,0x6);
+        assert_eq!(row, 0x4);
+        assert_eq!(collision, true);
     }
 }

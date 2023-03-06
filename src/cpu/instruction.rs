@@ -37,7 +37,7 @@ impl Instruction {
 
 #[cfg(test)]
 mod tests {
-    use crate::instruction::Instruction;
+    use crate::cpu::instruction::Instruction;
 
     #[test]
     fn new_instruction() {

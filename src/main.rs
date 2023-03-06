@@ -13,7 +13,7 @@ fn main() {
 
     let mut chip8 = Chip8::new(sdl_input, sdl_display);
     thread::spawn(move || {
-        chip8.load_rom(String::from("roms/chip8-test-suite.ch8")).expect("File to exists.");
+        chip8.load_rom_file(String::from("roms/Delay Timer Test [Matthew Mikolay, 2010].ch8")).expect("File to exists.");
         chip8.execute().expect("OH NO!");
     });
 
