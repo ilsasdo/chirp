@@ -1,5 +1,4 @@
 use std::thread;
-use crate::basic::{DummyInput};
 use crate::cpu::{Chip8};
 use crate::sdl::{SdlDisplay, SdlInput};
 

@@ -1,5 +1,5 @@
 use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, RecvError, Sender};
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -135,12 +135,11 @@ impl SdlDisplay {
                         tx.send(0x9).unwrap();
                     }
                     _ => {
-                        println!("No key pressed");
                     }
                 }
             }
 
-            thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+            thread::sleep(Duration::from_millis(1_000 / 60));
         }
     }
 }
@@ -157,9 +156,9 @@ impl Input for SdlInput {
     }
 
     fn current_value(&self) -> Option<u8> {
-        return match self.input_rx.recv() {
+        return match self.input_rx.try_recv() {
             Ok(key) => {
-                println!("Keycode: {}", key);
+                println!("current_key={}", key);
                 Some(key)
             }
             Err(_) => {
