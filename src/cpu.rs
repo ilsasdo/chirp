@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use log::debug;
 
 use rand::Rng;
 
@@ -151,18 +152,22 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     fn jump(&mut self, location: u16) {
+        debug!("JUMP {}", location);
         self.pc = location;
     }
 
     fn jump_with_offset(&mut self, location: u16) {
+        debug!("JUMP_OFFSET REG[0]={} + {}", self.register_get_value(0x0), location);
         self.jump((self.register_get_value(0x0) as u16) + location);
     }
 
     fn register_set_value(&mut self, register: u8, value: u8) {
+        debug!("REG_SET_VALUE REG[{}]={}", register, value);
         self.registers[usize::from(register)] = value;
     }
 
     fn set_index_register(&mut self, value: u16) {
+        debug!("INDEX_SET_VALUE {}", value);
         self.i = value;
     }
 
@@ -194,20 +199,19 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     fn register_add(&mut self, register_a: u8, register_b: u8) {
-        let a = self.registers[register_a as usize];
-        let b = self.registers[register_b as usize];
+        let a = self.register_get_value(register_a);
+        let b = self.register_get_value(register_b);
         let (result, overflows) = a.overflowing_add(b);
-
-        self.registers[register_a as usize] = result;
-        self.registers[0xF] = if overflows { 1 } else { 0 };
+        self.register_set_value(0xF, if overflows { 1 } else { 0 });
+        self.register_set_value(register_a, result);
     }
 
     fn register_subtract(&mut self, register_a: u8, register_b: u8) {
-        let a = self.registers[register_a as usize] as u16;
-        let b = self.registers[register_b as usize] as u16;
+        let a = self.register_get_value(register_a);
+        let b = self.register_get_value(register_b);
         let (result, overflows) = a.overflowing_sub(b);
-        self.registers[0xF] = if overflows { 1 } else { 0 };
-        self.registers[register_a as usize] = result as u8;
+        self.register_set_value(0xF, if overflows { 0 } else { 1 });
+        self.register_set_value(register_a, result);
     }
 
     fn register_left_shift(&mut self, register_a: u8, register_b: u8) {
@@ -215,7 +219,13 @@ impl<T: Input, D: Display> Chip8<T, D> {
             self.register_set(register_a, register_b);
         }
 
+        let a = self.register_get_value(register_a);
         self.register_set_value(register_a, self.register_get_value(register_a) << 1);
+        if a >= 128 {
+            self.register_set_value(0xF, 1);
+        } else {
+            self.register_set_value(0xF, 0);
+        }
     }
 
     fn register_right_shift(&mut self, register_a: u8, register_b: u8) {
@@ -223,7 +233,13 @@ impl<T: Input, D: Display> Chip8<T, D> {
             self.register_set(register_a, register_b);
         }
 
+        let a = self.register_get_value(register_a);
         self.register_set_value(register_a, self.register_get_value(register_a) >> 1);
+        if a % 2 == 0 {
+            self.register_set_value(0xF, 0);
+        } else {
+            self.register_set_value(0xF, 1);
+        }
     }
 
     fn skip_if_key_pressed_is(&mut self, register: u8) {
@@ -311,9 +327,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
     fn set_delay_timer(&mut self, register: u8) {
         let mut dt = self.delay_timer.lock().unwrap();
-        println!("set_delay_timer_before: {}", *dt);
         *dt = self.register_get_value(register);
-        println!("set_delay_timer_before: {}", *dt);
     }
 
     fn set_sound_timer(&mut self, register: u8) {
@@ -323,7 +337,6 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
     fn add_to_index(&mut self, register: u8) {
         let value = self.register_get_value(register) as u16;
-
         let (i, overflow) = self.i.overflowing_add(value);
         self.i = i;
         if overflow {
@@ -336,6 +349,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
     fn set_index_register_to_font(&mut self, register_font: u8) {
         let f = self.register_get_value(register_font) & 0xF;
+        debug!("INDEX_SET_FONT {}", f);
         self.set_index_register(((f * 5) + FONT_OFFSET) as u16);
     }
 
@@ -371,15 +385,15 @@ impl<T: Input, D: Display> Chip8<T, D> {
         // timer(Arc::clone(&self.sound_timer));
 
         loop {
+            thread::sleep(Duration::from_millis(1));
             // read the instruction pointed from the pc:
             let instruction = self.fetch_instruction()?;
-
-            // println!("Instruction: {}", instruction.to_string());
 
             match instruction.first_nibble {
                 0x0 => {
                     if instruction.byte_sum_3() == 0x0E0 {
                         self.clear_screen();
+                        self.display_output.draw(self.display);
                     } else if instruction.byte_sum_3() == 0x0EE {
                         self.subroutine_return();
                     }
@@ -434,7 +448,10 @@ impl<T: Input, D: Display> Chip8<T, D> {
                             self.register_subtract(instruction.second_nibble, instruction.third_nibble);
                         }
                         0x6 => {
-                            self.register_right_shift(instruction.third_nibble, instruction.second_nibble);
+                            self.register_right_shift(instruction.second_nibble, instruction.third_nibble);
+                        }
+                        0x7 => {
+                            self.register_subtract(instruction.third_nibble, instruction.second_nibble);
                         }
                         0xE => {
                             self.register_left_shift(instruction.second_nibble, instruction.third_nibble);
@@ -507,11 +524,8 @@ fn timer(delay: Arc<Mutex<u8>>) {
         loop {
             thread::sleep(Duration::from_millis(1000 / 60));
             let mut d = delay.lock().unwrap();
-
             if *d > 0 {
-                println!("delay_before: {}", *d);
                 *d -= 1;
-                println!("delay_after: {}", *d);
             }
         }
     });

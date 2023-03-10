@@ -1,5 +1,5 @@
 use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, SyncSender};
 use std::thread;
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use sdl2::rect::Rect;
 use crate::cpu::{Display, Input};
 
 pub struct SdlDisplay {
-    display_tx: Sender<[[bool; 32]; 64]>,
+    display_tx: SyncSender<[[bool; 32]; 64]>,
 }
 
 pub struct SdlInput {
@@ -46,7 +46,7 @@ impl SdlInput {
 
 impl SdlDisplay {
     pub fn new() -> (SdlDisplay, Receiver<[[bool; 32]; 64]>) {
-        let (display_tx, display_rx): (Sender<[[bool; 32]; 64]>, Receiver<[[bool; 32]; 64]>) = mpsc::channel();
+        let (display_tx, display_rx): (SyncSender<[[bool; 32]; 64]>, Receiver<[[bool; 32]; 64]>) = mpsc::sync_channel(1);
 
         return (SdlDisplay {
             display_tx
@@ -158,7 +158,6 @@ impl Input for SdlInput {
     fn current_value(&self) -> Option<u8> {
         return match self.input_rx.try_recv() {
             Ok(key) => {
-                println!("current_key={}", key);
                 Some(key)
             }
             Err(_) => {
