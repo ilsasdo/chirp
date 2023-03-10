@@ -261,6 +261,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
         match self.input.current_value() {
             None => {
                 // do nothing
+                self.pc += 2;
             }
             Some(key) => {
                 if key != value {

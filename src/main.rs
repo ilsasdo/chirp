@@ -14,7 +14,7 @@ fn main() {
 
     let mut chip8 = Chip8::new(sdl_input, sdl_display);
     thread::spawn(move || {
-        chip8.load_rom_file(String::from("roms/br8kout.ch8")).expect("File to exists.");
+        chip8.load_rom_file(String::from("roms/Space Invaders [David Winter].ch8")).expect("File to exists.");
         chip8.execute().expect("OH NO!");
     });
 
