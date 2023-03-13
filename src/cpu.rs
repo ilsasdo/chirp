@@ -371,6 +371,7 @@ impl<'a> Chip8<'a> {
         // timer(Arc::clone(&self.sound_timer));
 
         loop {
+            thread::sleep(Duration::from_millis(2));
             // read the instruction pointed from the pc:
             let instruction = self.fetch_instruction()?;
 

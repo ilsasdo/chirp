@@ -136,7 +136,6 @@ impl Input for SdlInput {
 
     fn is_key_pressed(&self, key: u8) -> bool {
         let pressed_keys = *self.keypad.lock().unwrap();
-        println!("pressed_keys: {pressed_keys} {key}");
         return (pressed_keys & (1 << key)) > 0;
     }
 }
