@@ -11,14 +11,15 @@ fn main() {
     // SimpleLogger::new().init().unwrap();
     let (sdl_display, display_rx) = SdlDisplay::new();
     let (sdl_input, input_tx) = SdlInput::new();
+    let keypad = sdl_input.keypad.clone();
 
-    let mut chip8 = Chip8::new(sdl_input, sdl_display);
     thread::spawn(move || {
+        let mut chip8 = Chip8::new(&sdl_input, &sdl_display);
         chip8.load_rom_file(String::from("roms/Space Invaders [David Winter].ch8")).expect("File to exists.");
         chip8.execute().expect("OH NO!");
     });
 
-    SdlDisplay::run(String::from("Chip8 Emulator"), 800, 600, input_tx, display_rx);
+    SdlDisplay::run(String::from("Chip8 Emulator"), 800, 600, keypad, display_rx);
 }
 
 #[cfg(test)]

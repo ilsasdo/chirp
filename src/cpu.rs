@@ -18,13 +18,13 @@ pub trait Display {
     fn draw(&self, display: [[bool; 32]; 64]);
 }
 
-pub trait Input {
-    fn wait(&self) -> u8;
+pub trait Input : Send {
+    fn wait_for_key(&self) -> u8;
 
-    fn current_value(&self) -> Option<u8>;
+    fn is_key_pressed(&self, key: u8) -> bool;
 }
 
-pub struct Chip8<T: Input, D: Display> {
+pub struct Chip8<'a> {
     ram: [u8; 4096],
     display: [[bool; 32]; 64],
     pc: u16,
@@ -34,16 +34,16 @@ pub struct Chip8<T: Input, D: Display> {
     sound_timer: Arc<Mutex<u8>>,
     registers: [u8; 16],
     options: Chip8Options,
-    input: T,
-    display_output: D,
+    input: &'a (dyn Input + 'a),
+    display_output: &'a (dyn Display + 'a),
 }
 
 struct Chip8Options {
     super_chip: bool,
 }
 
-impl<T: Input, D: Display> Chip8<T, D> {
-    pub fn new(input: T, display: D) -> Chip8<T, D> {
+impl<'a> Chip8<'a> {
+    pub fn new(input: &'a (dyn Input + 'a), display: &'a (dyn Display + 'a)) -> Chip8<'a> {
         let mut chip8 = Chip8 {
             ram: [0x0; 4096],
             display: [[false; 32]; 64],
@@ -242,32 +242,17 @@ impl<T: Input, D: Display> Chip8<T, D> {
         }
     }
 
-    fn skip_if_key_pressed_is(&mut self, register: u8) {
+    fn skip_if_key_is_pressed(&mut self, register: u8) {
         let value = self.register_get_value(register);
-        match self.input.current_value() {
-            Some(key) => {
-                if key == value {
-                    self.pc += 2;
-                }
-            }
-            None => {
-                // do nothing
-            }
+        if self.input.is_key_pressed(value) {
+            self.pc += 2;
         }
     }
 
-    fn skip_if_key_pressed_is_not(&mut self, register: u8) {
+    fn skip_if_key_is_not_pressed(&mut self, register: u8) {
         let value = self.register_get_value(register);
-        match self.input.current_value() {
-            None => {
-                // do nothing
-                self.pc += 2;
-            }
-            Some(key) => {
-                if key != value {
-                    self.pc += 2;
-                }
-            }
+        if !self.input.is_key_pressed(value) {
+            self.pc += 2;
         }
     }
 
@@ -377,7 +362,7 @@ impl<T: Input, D: Display> Chip8<T, D> {
     }
 
     fn get_key(&mut self, register: u8) {
-        let key = self.input.wait();
+        let key = self.input.wait_for_key();
         self.register_set_value(register, key);
     }
 
@@ -386,7 +371,6 @@ impl<T: Input, D: Display> Chip8<T, D> {
         // timer(Arc::clone(&self.sound_timer));
 
         loop {
-            thread::sleep(Duration::from_millis(1));
             // read the instruction pointed from the pc:
             let instruction = self.fetch_instruction()?;
 
@@ -484,9 +468,9 @@ impl<T: Input, D: Display> Chip8<T, D> {
 
                 0xE => {
                     if instruction.byte_sum_2() == 0x9E {
-                        self.skip_if_key_pressed_is(instruction.second_nibble)
+                        self.skip_if_key_is_pressed(instruction.second_nibble)
                     } else if instruction.byte_sum_2() == 0xA1 {
-                        self.skip_if_key_pressed_is_not(instruction.second_nibble)
+                        self.skip_if_key_is_not_pressed(instruction.second_nibble)
                     }
                 }
 
@@ -573,7 +557,7 @@ mod test {
     fn draw_sprite_row() {
         let input = DummyInput {};
         let display = FakeDisplay {};
-        let cpu = Chip8::new(input, display);
+        let cpu = Chip8::new(&input, &display);
         let (row, collision) = cpu.draw_sprite_row(0x1, 0x0);
         assert_eq!(row, 0x1);
         assert_eq!(collision, false);
@@ -599,7 +583,7 @@ mod test {
 
     #[test]
     fn get_display_row() {
-        let mut cpu = Chip8::new(DummyInput {}, FakeDisplay {});
+        let mut cpu = Chip8::new(&DummyInput {}, &FakeDisplay {});
         // 10000101 -> 0x85 -> 113
         cpu.display[0][0] = true;
         cpu.display[1][0] = false;

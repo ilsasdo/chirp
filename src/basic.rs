@@ -21,11 +21,11 @@ impl Display for ConsoleDisplay {
 pub struct DummyInput {}
 
 impl Input for DummyInput {
-    fn wait(&self) -> u8 {
+    fn wait_for_key(&self) -> u8 {
         todo!()
     }
 
-    fn current_value(&self) -> Option<u8> {
+    fn is_key_pressed(&self, key: u8) -> bool {
         todo!()
     }
 }

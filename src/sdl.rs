@@ -1,10 +1,10 @@
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc, Mutex};
 use std::sync::mpsc::{Receiver, Sender, SyncSender};
 use std::thread;
 use std::time::Duration;
 
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::{Keycode, Scancode};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 
@@ -15,7 +15,7 @@ pub struct SdlDisplay {
 }
 
 pub struct SdlInput {
-    input_rx: Receiver<u8>,
+    pub keypad: Arc<Mutex<u16>>
 }
 
 fn to_sdl_rect(display: [[bool; 32]; 64], width: u32, height: u32) -> Vec<Rect> {
@@ -39,9 +39,13 @@ impl SdlInput {
     pub fn new() -> (SdlInput, Sender<u8>) {
         let (input_tx, input_rx): (Sender<u8>, Receiver<u8>) = mpsc::channel();
         return (SdlInput {
-            input_rx
+            keypad: Arc::new(Mutex::new(0x0))
         }, input_tx);
     }
+}
+
+fn press_key(key:u16, keypad: &u16) -> u16 {
+    return keypad | (1 << key);
 }
 
 impl SdlDisplay {
@@ -53,7 +57,7 @@ impl SdlDisplay {
         }, display_rx);
     }
 
-    pub fn run(title: String, width: u32, height: u32, tx: Sender<u8>, rx: Receiver<[[bool; 32]; 64]>) {
+    pub fn run(title: String, width: u32, height: u32, keypad: Arc<Mutex<u16>>, rx: Receiver<[[bool; 32]; 64]>) {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
         let window = video_subsystem.window(title.as_str(), width, height)
@@ -85,59 +89,34 @@ impl SdlDisplay {
                     Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                         break 'running;
                     }
-                    Event::KeyDown { keycode: Some(Keycode::Z), .. } => {
-                        tx.send(0xA).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::C), .. } => {
-                        tx.send(0xB).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::Num4), .. } => {
-                        tx.send(0xC).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::R), .. } => {
-                        tx.send(0xD).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::F), .. } => {
-                        tx.send(0xE).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::V), .. } => {
-                        tx.send(0xF).unwrap();
-                    }
-
-                    Event::KeyDown { keycode: Some(Keycode::X), .. } => {
-                        tx.send(0x0).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::Num1), .. } => {
-                        tx.send(0x1).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::Num2), .. } => {
-                        tx.send(0x2).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::Num3), .. } => {
-                        tx.send(0x3).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::Q), .. } => {
-                        tx.send(0x4).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::W), .. } => {
-                        tx.send(0x5).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::E), .. } => {
-                        tx.send(0x6).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::A), .. } => {
-                        tx.send(0x7).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::S), .. } => {
-                        tx.send(0x8).unwrap();
-                    }
-                    Event::KeyDown { keycode: Some(Keycode::D), .. } => {
-                        tx.send(0x9).unwrap();
-                    }
-                    _ => {
-                    }
+                    _ => {}
                 }
             }
+
+            let mut keys : u16 = 0;
+            for pressed_key in event_pump.keyboard_state().pressed_scancodes() {
+                match pressed_key {
+                    Scancode::Num1 => keys = press_key(0x1, &keys),
+                    Scancode::Num2 => keys = press_key(0x2, &keys),
+                    Scancode::Num3 => keys = press_key(0x3, &keys),
+                    Scancode::Num4 => keys = press_key(0xC, &keys),
+                    Scancode::Q => keys = press_key(0x4, &keys),
+                    Scancode::W => keys = press_key(0x5, &keys),
+                    Scancode::E => keys = press_key(0x6, &keys),
+                    Scancode::R => keys = press_key(0xD, &keys),
+                    Scancode::A => keys = press_key(0x7, &keys),
+                    Scancode::S => keys = press_key(0x8, &keys),
+                    Scancode::D => keys = press_key(0x9, &keys),
+                    Scancode::F => keys = press_key(0xE, &keys),
+                    Scancode::Z => keys = press_key(0xA, &keys),
+                    Scancode::X => keys = press_key(0x0, &keys),
+                    Scancode::C => keys = press_key(0xB, &keys),
+                    Scancode::V => keys = press_key(0xF, &keys),
+
+                    _ => {}
+                }
+            }
+            *(keypad.lock().unwrap()) = keys;
 
             thread::sleep(Duration::from_millis(1_000 / 60));
         }
@@ -151,18 +130,13 @@ impl Display for SdlDisplay {
 }
 
 impl Input for SdlInput {
-    fn wait(&self) -> u8 {
-        return self.input_rx.recv().unwrap();
+    fn wait_for_key(&self) -> u8 {
+        return 0x0;
     }
 
-    fn current_value(&self) -> Option<u8> {
-        return match self.input_rx.try_recv() {
-            Ok(key) => {
-                Some(key)
-            }
-            Err(_) => {
-                None
-            }
-        };
+    fn is_key_pressed(&self, key: u8) -> bool {
+        let pressed_keys = *self.keypad.lock().unwrap();
+        println!("pressed_keys: {pressed_keys} {key}");
+        return (pressed_keys & (1 << key)) > 0;
     }
 }
